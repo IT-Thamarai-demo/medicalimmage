@@ -1,0 +1,39 @@
+SYSTEM ARCHITECTURE DIAGRAM
+
+[ User (Doctor/Patient) ]
+        |
+        | (Upload X-Ray Image)
+        v
++-----------------------+
+|   Streamlit Web UI    |  <--- (Frontend Dashboard)
++-----------------------+
+        |
+        v
++-----------------------+
+|  Image Preprocessing  |  <--- (Resize to 224x224, Normalize)
++-----------------------+
+        |
+        v
++-----------------------+      +-------------------------+
+| EfficientNetB0 Model  | ---> |   Grad-CAM Module       |
+| (Feature Extraction)  |      | (Generates Heatmap)     |
++-----------------------+      +-------------------------+
+        |                                 |
+   (Feature Vector)                       v
+        |                          (Overlay Heatmap)
+        v
++-----------------------+
+|   Linear SVM Model    | 
+|   (Classification)    |
++-----------------------+
+        |
+        | (Output: Pneumonia/Normal)
+        v
++-----------------------+
+|   Result Display      |
++-----------------------+
+        |
+        v
++-----------------------+
+|  PDF Report Generator |  ---> [ Download Medical Report ]
++-----------------------+
