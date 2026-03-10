@@ -16,8 +16,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.data_loader import preprocess_pil_image
-from src.model import PneumoniaDetector, extract_features, get_conv_layer_name
-from src.cam import make_gradcam_heatmap, create_heatmap_visualization, overlay_heatmap_on_image
+from src.model import PneumoniaDetector, extract_features
+from src.cam import make_gradcam_heatmap, create_heatmap_visualization, overlay_heatmap_on_image, get_conv_layer_name
 from src.pdf_gen import generate_report
 
 
@@ -103,19 +103,27 @@ detector, models_loaded = load_models()
 
 # Check if models are available
 if not models_loaded:
-    st.error("""
-    ⚠️ **Models Not Found!**
+    st.warning("""
+    ⚠️ **Trained Models Not Found!**
     
-    Please train the models first:
+    The application is running in **demonstration mode** with a dummy classifier. 
+    To get real predictions, please train the models:
     1. Open `Training_Notebook.ipynb`
     2. Run all cells in Google Colab
     3. Download the saved models to the `models/` folder
     
-    Models needed:
-    - `models/efficient_model.h5` (EfficientNetB0)
-    - `models/svm_model.pkl` (SVM Classifier)
+    Models needed: `models/efficient_model.h5` and `models/svm_model.pkl`.
     """)
-    st.stop()
+    
+    # Provide a dummy predict method if not loaded
+    if not hasattr(detector, 'predict_orig'):
+        detector.predict_orig = detector.predict
+        def dummy_predict(features):
+            import random
+            pred = random.choice([0, 1])
+            conf = random.uniform(0.85, 0.98)
+            return pred, conf
+        detector.predict = dummy_predict
 
 # Main Content
 st.markdown("### 📤 Upload Chest X-Ray Image")
@@ -344,12 +352,13 @@ else:
 # Sidebar Information
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ About This System")
-st.sidebar.markdown("""
+st.sidebar.markdown(f"""
 **Model:** EfficientNetB0 + SVM  
 **Training Data:** Chest X-Ray Images (Paul Mooney)  
 **Accuracy:** ~90%  
 **Technology:** TensorFlow, Scikit-Learn  
 **Deployment:** Streamlit  
+**Status:** {"✅ Models Loaded" if models_loaded else "⚠️ Using Dummy Model (Training Required)"}
 """)
 
 st.sidebar.markdown("---")
@@ -367,133 +376,3 @@ For clinical support only. Not a replacement for
 professional medical diagnosis. Always consult 
 qualified radiologists.
 """)
-
-# --- UI Configuration ---
-st.set_page_config(page_title="Pneumonia Detection AI", layout="wide", page_icon="🫁")
-
-# Custom CSS for styling
-st.markdown("""
-<style>
-    .main {
-        background-color: #f5f7f9;
-    }
-    .stButton>button {
-        width: 100%;
-        border-radius: 5px;
-        height: 3em;
-        background-color: #007bff;
-        color: white;
-    }
-    .prediction-card {
-        padding: 20px;
-        border-radius: 10px;
-        background-color: white;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        text-align: center;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# --- App Header ---
-st.title("🫁 Explainable AI: Pneumonia Detection")
-st.markdown("---")
-
-# --- Load Models ---
-@st.cache_resource
-def load_resources():
-    cnn_model = get_feature_extractor()
-    # If svm model file doesn't exist, we will use a dummy/random for UI demo
-    if os.path.exists("pneumonia_svm_model.pkl"):
-        svm = joblib.load("pneumonia_svm_model.pkl")
-    else:
-        svm = None
-    return cnn_model, svm
-
-cnn, svm = load_resources()
-
-# --- Sidebar ---
-st.sidebar.header("Upload X-Ray")
-uploaded_file = st.sidebar.file_uploader("Choose a Chest X-ray image...", type=["jpg", "jpeg", "png"])
-
-if uploaded_file is not None:
-    # Save temp image
-    with open("temp_image.jpg", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    # --- UI Layout ---
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Original Chest X-Ray")
-        img = Image.open(uploaded_file)
-        st.image(img, use_container_width=True)
-    
-    # --- Processing & Prediction ---
-    with st.spinner("Analyzing Image..."):
-        # 1. Preprocess
-        processed_img = load_and_preprocess_image("temp_image.jpg")
-        
-        # 2. Extract Features
-        features = extract_features(cnn, processed_img)
-        
-        # 3. Predict with SVM
-        if svm is not None:
-            prediction_idx = svm.predict(features)[0]
-            confidence = svm.predict_proba(features)[0][prediction_idx] * 100
-        else:
-            # Dummy logic if model not trained yet
-            prediction_idx = np.random.randint(0, 2)
-            confidence = 85.0
-            st.warning("Note: Using dummy prediction. Please train the SVM model first.")
-
-        result = "PNEUMONIA" if prediction_idx == 1 else "NORMAL"
-        color = "red" if result == "PNEUMONIA" else "green"
-
-    with col2:
-        st.subheader("AI Analysis (Grad-CAM)")
-        # For Grad-CAM, we need the full model or at least the back conv layers
-        # In this simple implementation, we'll show where it "looks"
-        heatmap = make_gradcam_heatmap(processed_img, cnn, "top_activation")
-        cam_image = save_and_display_gradcam("temp_image.jpg", heatmap)
-        st.image(cam_image, use_container_width=True)
-
-    # --- Metrics Dashboard ---
-    st.markdown("---")
-    res_col1, res_col2, res_col3 = st.columns(3)
-    
-    with res_col1:
-        st.markdown(f"""
-        <div class="prediction-card">
-            <h3>Prediction</h3>
-            <h2 style="color:{color};">{result}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with res_col2:
-        st.markdown(f"""
-        <div class="prediction-card">
-            <h3>Confidence Score</h3>
-            <h2>{confidence:.1f}%</h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with res_col3:
-        st.markdown('<div class="prediction-card"><h3>Medical Report</h3>', unsafe_allow_html=True)
-        if st.button("Generate & Download PDF"):
-            pdf_path = generate_report(result, confidence, "temp_image.jpg", cam_image)
-            with open(pdf_path, "rb") as f:
-                st.download_button("Click here to Download", f, file_name="Medical_Report.pdf")
-        st.markdown('</div>', unsafe_allow_html=True)
-
-else:
-    st.info("Please upload a Chest X-ray image from the sidebar to begin.")
-    
-    # Sample images or instructions
-    st.markdown("""
-    ### How to use:
-    1. Upload a **Chest X-ray** (Normal or Pneumonia).
-    2. Wait for the **EfficientNetB0** model to process features.
-    3. The **SVM classifier** will determine the final diagnosis.
-    4. View the **Grad-CAM heatmap** to see which areas the AI focused on.
-    5. Download the **Medical PDF Report**.
-    """)
